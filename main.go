@@ -264,6 +264,7 @@ func (d *Domain) GenZoneFile() (err error) {
 }
 
 func (d *Domain) AddRecordEntry(rName, rType, rValue string, rTTL, rPriority int) {
+	d.Serial += 1
 	rType = strings.ToUpper(rType)
 	//rValue = strings.TrimSpace(rValue)
 	rValue = strings.Join(strings.Fields(rValue), "")
