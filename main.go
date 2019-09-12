@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
@@ -17,8 +18,6 @@ const (
 	BucketName = "domains"
 	TimeFormat = "2006-01-02 15:04:05"
 )
-
-type manageProcesses struct{}
 
 type Domain struct {
 	Name      string
@@ -35,6 +34,12 @@ type RecordEntry struct {
 	Priority int
 	Value    string
 }
+
+type NameSorter []*RecordEntry
+
+func (a NameSorter) Len() int           { return len(a) }
+func (a NameSorter) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a NameSorter) Less(i, j int) bool { return a[i].Name < a[j].Name }
 
 var db = &bolt.DB{}
 
@@ -72,7 +77,6 @@ func init() {
 func main() {
 	// close db when app exit
 	defer db.Close()
-	var err error
 
 	// init some data to db
 	/*
@@ -105,33 +109,63 @@ func main() {
 		}
 
 	*/
+	/*
+		td := NewDomain("t1")
+		tr, err := NewRecordEntry()
+		if err != nil {
+			log.Println(err)
+		}
+		tr.Name = "www"
+		tr.Type = "A"
+		tr.TTL = 600
+		tr.Priority = -1
+		tr.Value = "1.1.1.1"
+		td.Records = map[string]*RecordEntry{
+			tr.ID: tr,
+		}
 
-	td := NewDomain("t1")
-	tr, err := NewRecordEntry()
+		td.AddRecordEntry("w2", "a", "2.2.2.2", 300, -1)
+		td.AddRecordEntry("w3", "a", "3.3.3.3", 300, -1)
+
+		fmt.Printf("%#v\n", td)
+
+		err = td.SaveToDB()
+		if err != nil {
+			log.Println(err)
+		}
+		err = td.GenZoneFile()
+		if err != nil {
+			log.Println(err)
+		}
+
+	*/
+
+	d, _ := DomainFromDB("t1.lan")
+	err := d.DelRecordEntry("8d676ee2-d144-4cd4-a0bd-b737c3795cc2")
 	if err != nil {
 		log.Println(err)
-	}
-	tr.Name = "www"
-	tr.Type = "A"
-	tr.TTL = 600
-	tr.Priority = -1
-	tr.Value = "1.1.1.1"
-	td.Records = map[string]*RecordEntry{
-		tr.ID: tr,
+	} else {
+		d.SaveToDB()
+		d.GenZoneFile()
 	}
 
-	td.AddRecordEntry("w2", "a", "2.2.2.2", 300, -1)
-	td.AddRecordEntry("w3", "a", "2.2.2.2", 300, -1)
+	d.AddRecordEntry("w1", "A", "1.1.1.1", 600, -1)
+	d.SaveToDB()
+	d.GenZoneFile()
 
-	fmt.Printf("%#v\n", td)
+	ds, _ := GetAllDomain()
+	for _, i := range ds {
+		fmt.Printf("Domain: %s\n", i.Name)
+		var _r []*RecordEntry
+		for _, v := range i.Records {
+			_r = append(_r, v)
+		}
 
-	err = td.SaveToDB()
-	if err != nil {
-		log.Println(err)
-	}
-	err = td.GenZoneFile()
-	if err != nil {
-		log.Println(err)
+		sort.Sort(NameSorter(_r))
+
+		for _, i := range _r {
+			fmt.Printf("\tID: %s\tName: %s\tValue: %s\n", i.ID, i.Name, i.Value)
+		}
 	}
 
 	// static file, such as css,js,images
@@ -153,7 +187,7 @@ func NewRecordEntry() (*RecordEntry, error) {
 	}, err
 }
 
-func (mp *manageProcesses) GetAll() (domains []Domain, err error) {
+func GetAllDomain() (domains []Domain, err error) {
 	err = db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(BucketName))
 		c := b.Cursor()
@@ -176,6 +210,22 @@ func NewDomain(name string) *Domain {
 		Serial:    1,
 		CreatedAt: time.Now().Format(TimeFormat),
 	}
+}
+
+func DomainFromDB(name string) (d Domain, err error) {
+	err = db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(BucketName))
+		_d := b.Get([]byte(name))
+
+		err = json.Unmarshal(_d, &d)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	return
 }
 
 func (d *Domain) SaveToDB() (err error) {
@@ -207,7 +257,8 @@ func (d *Domain) GenZoneFile() (err error) {
 		fileContent = append(fileContent, r)
 	}
 
-	fileName := fmt.Sprintf("zones/%s", d.Name)
+	fileName := fmt.Sprintf("/opt/goproject/src/dnswm/zones/%s", d.Name)
+	fmt.Println(fileName)
 	f, err := os.OpenFile(fileName, os.O_CREATE|os.O_WRONLY, 0666)
 	defer f.Close()
 
@@ -250,7 +301,15 @@ func (d *Domain) AddRecordEntry(rName, rType, rValue string, rTTL, rPriority int
 		r.Priority = -1
 	}
 
-	fmt.Printf("%#v\n", r)
-
 	d.Records[r.ID] = r
+}
+
+func (d *Domain) DelRecordEntry(id string) (err error) {
+	if _, ok := d.Records[id]; ok {
+		delete(d.Records, id)
+		d.Serial += 1
+		return nil
+	}
+
+	return fmt.Errorf("no record entry")
 }
