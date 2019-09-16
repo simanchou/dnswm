@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"path"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -81,92 +80,6 @@ func init() {
 func main() {
 	// close db when app exit
 	defer db.Close()
-
-	// init some data to db
-	/*
-		d := Domain{
-			Name:"example.lan",
-			Serial:1,
-			Records: map[string][]RecordEntry{
-				"A":{
-					{
-						Name:"www",
-						Type:"A",
-						TTL:3600,
-						Priority:-1,
-						Value:"127.0.0.1",
-					},
-				},
-			},
-		}
-
-		err = db.Update(func(tx *bolt.Tx) error {
-			b := tx.Bucket([]byte(BucketName))
-			encoded, err := json.Marshal(d)
-			if err != nil {
-				return err
-			}
-			return b.Put([]byte(d.Name), encoded)
-		})
-		if err != nil {
-			log.Fatalln(err)
-		}
-
-	*/
-	/*
-		td := NewDomain("t1")
-		tr, err := NewRecordEntry()
-		if err != nil {
-			log.Println(err)
-		}
-		tr.Name = "www"
-		tr.Type = "A"
-		tr.TTL = 600
-		tr.Priority = -1
-		tr.Value = "1.1.1.1"
-		td.Records = map[string]*RecordEntry{
-			tr.ID: tr,
-		}
-
-		td.AddRecordEntry("w2", "a", "2.2.2.2", 300, -1)
-		td.AddRecordEntry("w3", "a", "3.3.3.3", 300, -1)
-
-		fmt.Printf("%#v\n", td)
-
-		err = td.SaveToDB()
-		if err != nil {
-			log.Println(err)
-		}
-		err = td.GenZoneFile()
-		if err != nil {
-			log.Println(err)
-		}
-
-	*/
-
-	d, _ := DomainFromDB("t1.lan")
-	err := d.DelRecordEntry("8d676ee2-d144-4cd4-a0bd-b737c3795cc2")
-	if err != nil {
-		log.Println(err)
-	} else {
-		d.SaveToDB()
-		d.GenZoneFile()
-	}
-
-	ds, _ := GetAllDomain()
-	for _, i := range ds {
-		fmt.Printf("Domain: %s\n", i.Name)
-		var _r []*RecordEntry
-		for _, v := range i.Records {
-			_r = append(_r, v)
-		}
-
-		sort.Sort(NameSorter(_r))
-
-		for _, i := range _r {
-			fmt.Printf("\tID: %s\tName: %s\tValue: %s\n", i.ID, i.Name, i.Value)
-		}
-	}
 
 	// static file, such as css,js,images
 	staticFiles := http.FileServer(http.Dir("assets"))
@@ -305,7 +218,6 @@ func (d *Domain) AddRecordEntry(rName, rType, rValue string, rTTL, rPriority int
 	d.Serial += 1
 	r := RecordEntry{}
 	rType = strings.ToUpper(rType)
-	//rValue = strings.TrimSpace(rValue)
 	rValue = strings.Join(strings.Fields(rValue), "")
 	if rType == "CNAME" {
 		_last := rValue[len(rValue)-1:]
@@ -419,7 +331,6 @@ func APIDomain(w http.ResponseWriter, r *http.Request) {
 	case "POST":
 		r.ParseForm()
 		_d := r.Form["domain"][0]
-		log.Println(_d)
 
 		rd := HTTPResponseData{
 			Code: 0,
@@ -443,7 +354,6 @@ func APIDomain(w http.ResponseWriter, r *http.Request) {
 		}
 
 		domainForAdd := NewDomain(_d)
-		log.Printf("%#v\n", domainForAdd)
 		err := domainForAdd.SaveToDB()
 		if err != nil {
 			rd.Code = 1
@@ -466,7 +376,6 @@ func APIDomain(w http.ResponseWriter, r *http.Request) {
 	case "DELETE":
 		r.ParseForm()
 		_d := r.Form["domain"][0]
-		log.Println(_d)
 
 		rd := HTTPResponseData{
 			Code: 0,
@@ -603,8 +512,6 @@ func APIRecord(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		log.Printf("%#v\n", d)
-
 		_id := MD5ID(pm["name"] + pm["type"] + pm["value"])
 		if d.RecordIsExist(_id) {
 			rd.Code = 1
@@ -635,7 +542,6 @@ func APIRecord(w http.ResponseWriter, r *http.Request) {
 		log.Println(rd.Msg)
 		json.NewEncoder(w).Encode(rd)
 	case "DELETE":
-		log.Printf("this %s method\n", r.Method)
 		err := r.ParseForm()
 		if err != nil {
 			log.Println(err)
@@ -651,8 +557,6 @@ func APIRecord(w http.ResponseWriter, r *http.Request) {
 			Code: 0,
 			Msg:  fmt.Sprintf("delete record for domain %s successful", pm["domain"]),
 		}
-
-		log.Printf("%#v\n", pm)
 
 		for k := range pm {
 			if pm[k] == "" {
@@ -720,7 +624,8 @@ func GUIDomain(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Println(err)
 		}
-		log.Println(dl)
+		s := fmt.Sprintf("query all domains done")
+		log.Println(s)
 		tmpl := template.Must(template.ParseFiles("tmpl/domain-list.html"))
 		tmpl.Execute(w, dl)
 	case "POST":
@@ -754,7 +659,8 @@ func GUIDomain(w http.ResponseWriter, r *http.Request) {
 			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
 			tmpl.Execute(w, s)
 		}
-
+		s := fmt.Sprintf("domain %s add successful", d.Name)
+		log.Println(s)
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 
 	default:
@@ -783,7 +689,6 @@ func GUIDomainDel(w http.ResponseWriter, r *http.Request) {
 	case "POST":
 		r.ParseForm()
 		_d := r.PostFormValue("domaindel-input")
-		log.Println(_d)
 
 		d, err := DomainFromDB(_d)
 		if err != nil {
@@ -823,7 +728,6 @@ func GUIRecord(w http.ResponseWriter, r *http.Request) {
 	case "GET":
 		r.ParseForm()
 		_d := r.FormValue("domain")
-		log.Println(_d)
 
 		d, err := DomainFromDB(_d)
 		if err != nil {
@@ -836,7 +740,6 @@ func GUIRecord(w http.ResponseWriter, r *http.Request) {
 		tmpl.Execute(w, d)
 	case "POST":
 		r.ParseForm()
-		log.Println(r.PostForm)
 
 		_domain := r.PostFormValue("domain")
 		_name := r.PostFormValue("name")
@@ -905,7 +808,6 @@ func GUIRecordDel(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
 		r.ParseForm()
-		log.Println(r.Form)
 
 		_d := r.FormValue("domain")
 		_id := r.FormValue("record_id")
@@ -933,7 +835,6 @@ func GUIRecordDel(w http.ResponseWriter, r *http.Request) {
 		tmpl.Execute(w, _dr)
 	case "POST":
 		r.ParseForm()
-		log.Println(r.PostForm)
 
 		_d := r.PostFormValue("record-del-domain-input")
 		_id := r.PostFormValue("record-del-id-input")
