@@ -175,7 +175,7 @@ func main() {
 	http.HandleFunc("/", GUIDomain)
 	http.HandleFunc("/domaindel", GUIDomainDel)
 	http.HandleFunc("/record", GUIRecord)
-	//http.HandleFunc("/recorddel", recordDel)
+	http.HandleFunc("/recorddel", GUIRecordDel)
 
 	http.HandleFunc("/api/domain", APIDomain)
 	http.HandleFunc("/api/record", APIRecord)
@@ -893,5 +893,91 @@ func GUIRecord(w http.ResponseWriter, r *http.Request) {
 		s := fmt.Sprintf("record [ %s %s %s ] add successful", _name, _type, _value)
 		log.Println(s)
 		http.Redirect(w, r, fmt.Sprintf("/record?domain=%s", _domain), http.StatusSeeOther)
+	default:
+		s := "unknown method"
+		log.Println(s)
+		tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
+		tmpl.Execute(w, s)
+	}
+}
+
+func GUIRecordDel(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		r.ParseForm()
+		log.Println(r.Form)
+
+		_d := r.FormValue("domain")
+		_id := r.FormValue("record_id")
+
+		d, err := DomainFromDB(_d)
+		if err != nil {
+			s := fmt.Sprintf("%s", err)
+			log.Println(s)
+			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
+			tmpl.Execute(w, s)
+		}
+
+		type dr struct {
+			Name string
+			R    *RecordEntry
+		}
+
+		_dr := dr{}
+		_dr.Name = d.Name
+		_dr.R = d.Records[_id]
+
+		s := fmt.Sprintf("begin to delete record [ name: %s type: %s value: %s ] for domain %s", _dr.R.Name, _dr.R.Type, _dr.R.Value, _dr.Name)
+		log.Println(s)
+		tmpl := template.Must(template.ParseFiles("tmpl/record-del.html"))
+		tmpl.Execute(w, _dr)
+	case "POST":
+		r.ParseForm()
+		log.Println(r.PostForm)
+
+		_d := r.PostFormValue("record-del-domain-input")
+		_id := r.PostFormValue("record-del-id-input")
+
+		d, err := DomainFromDB(_d)
+		if err != nil {
+			s := fmt.Sprintf("%s", err)
+			log.Println(s)
+			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
+			tmpl.Execute(w, s)
+		}
+
+		_name := d.Records[_id].Name
+		_type := d.Records[_id].Type
+		_value := d.Records[_id].Value
+
+		err = d.DelRecordEntry(_id)
+		if err != nil {
+			s := fmt.Sprintf("%s", err)
+			log.Println(s)
+			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
+			tmpl.Execute(w, s)
+		}
+		err = d.SaveToDB()
+		if err != nil {
+			s := fmt.Sprintf("%s", err)
+			log.Println(s)
+			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
+			tmpl.Execute(w, s)
+		}
+		err = d.GenZoneFile()
+		if err != nil {
+			s := fmt.Sprintf("%s", err)
+			log.Println(s)
+			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
+			tmpl.Execute(w, s)
+		}
+		s := fmt.Sprintf("delete record [ name: %s type: %s value: %s ] for domain %s successful", _name, _type, _value, d.Name)
+		log.Println(s)
+		http.Redirect(w, r, fmt.Sprintf("/record?domain=%s", d.Name), http.StatusSeeOther)
+	default:
+		s := "unknown method"
+		log.Println(s)
+		tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
+		tmpl.Execute(w, s)
 	}
 }
