@@ -157,7 +157,7 @@
                                 <div class="panel-body">
 
                                     <form id="add-domain-form" method="POST" action="/">
-                                        <label>New Domain</label><input name="domain-name" type="text" class="form-control" placeholder="example.com" required />
+                                        <label>New Domain(only support *.lan)</label><input name="domain-name" type="text" class="form-control" placeholder="example.lan" required />
                                         <br>
                                         <input id="domain-input" type="submit" class="btn btn-success m-b-sm" value="Add new domain" />
                                     </form>
@@ -175,7 +175,7 @@
                                             {{range .}}
                                             <tr>
                                                 <td><a href="/record?domain={{.Name}}">{{.Name}}</a></td>
-                                                <td>{{.Created}}</td>
+                                                <td>{{.CreatedAt}}</td>
                                                 <td><a href="/domaindel?domain={{.Name}}" target="_blank"><i class="fa fa-close" aria-hidden="true"></i></a></td>
                                             </tr>
                                             {{end}}

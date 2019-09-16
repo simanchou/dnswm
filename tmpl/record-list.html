@@ -161,23 +161,25 @@
                                         <table class="table">
                                             <thead>
                                             <tr>
-                                                <th>Record</th>
+                                                <th>Name</th>
                                                 <th>Type</th>
-                                                <th>PointsTo</th>
+                                                <th>Value</th>
                                                 <th>TTL</th>
+                                                <th>Priority</th>
                                             </tr>
                                             </thead>
                                             <tbody>
                                             <tr>
-                                                <td><input name="record" type="text" class="form-control" placeholder="www" required></td>
-                                                <td><select name="record-type" style="margin-bottom:15px;" class="form-control">
+                                                <td><input name="name" type="text" class="form-control" placeholder="www" required></td>
+                                                <td><select name="type" style="margin-bottom:15px;" class="form-control">
                                                         <option value="A">A</option>
                                                         <option value="CNAME">CNAME</option>
                                                         <option value="MX">MX</option>
                                                         <option value="TXT">TXT</option>
                                                     </select></td>
-                                                <td><input name="pointsto" type="text" class="form-control" placeholder="1.1.1.1" required></td>
+                                                <td><input name="value" type="text" class="form-control" placeholder="1.1.1.1" required></td>
                                                 <td><input name="ttl" type="text" class="form-control" placeholder="600"></td>
+                                                <td><input name="priority" type="text" class="form-control" placeholder="only need when Type is MX, like: 10"></td>
                                             </tr>
                                             </tbody>
                                         </table>
@@ -188,30 +190,34 @@
                                         <table id="table-record-list" class="display table" style="width: 100%; cellspacing: 0;">
                                             <thead>
                                                 <tr>
-                                                    <th>Record</th>
+                                                    <th>Name</th>
                                                     <th>Type</th>
-                                                    <th>PointsTo</th>
+                                                    <th>Value</th>
                                                     <th>TTL</th>
+                                                    <th>Priority</th>
                                                     <th>Action</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
                                             {{range $key, $value := .Records}}
                                             <tr>
-                                                <td>{{$value.Record}}</td>
+                                                <td>{{$value.Name}}</td>
                                                 <td>{{$value.Type}}</td>
-                                                <td>{{$value.PointsTo}}</td>
+                                                <td>{{$value.Value}}</td>
                                                 <td>{{$value.TTL}}</td>
+                                                {{if eq $value.Priority -1}}<td>-</td>{{end}}
+                                                {{if ne $value.Priority -1}}<td>{{$value.Priority}}</td>{{end}}
                                                 <td><a href="/recorddel?domain={{$domainname}}&record_id={{$value.ID}}" target="_blank"><i class="fa fa-close" aria-hidden="true"></i></a></td>
                                             </tr>
                                             {{end}}
                                             </tbody>
                                             <tfoot>
                                                 <tr>
-                                                    <th>Record</th>
+                                                    <th>Name</th>
                                                     <th>Type</th>
-                                                    <th>PointsTo</th>
+                                                    <th>Value</th>
                                                     <th>TTL</th>
+                                                    <th>Priority</th>
                                                     <th>Action</th>
                                                 </tr>
                                             </tfoot>

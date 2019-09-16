@@ -1,10 +1,11 @@
 package main
 
 import (
-	"dnswm/utils"
+	"crypto/md5"
 	"encoding/json"
 	"fmt"
 	"github.com/boltdb/bolt"
+	"html/template"
 	"io"
 	"log"
 	"net/http"
@@ -171,15 +172,21 @@ func main() {
 	staticFiles := http.FileServer(http.Dir("assets"))
 	http.Handle("/assets/", http.StripPrefix("/assets/", staticFiles))
 
-	//http.HandleFunc("/", domainList)
-	//http.HandleFunc("/domaindel", domainDel)
-	//http.HandleFunc("/record", recordList)
+	http.HandleFunc("/", GUIDomain)
+	http.HandleFunc("/domaindel", GUIDomainDel)
+	http.HandleFunc("/record", GUIRecord)
 	//http.HandleFunc("/recorddel", recordDel)
 
 	http.HandleFunc("/api/domain", APIDomain)
 	http.HandleFunc("/api/record", APIRecord)
 
 	http.ListenAndServe(":9001", nil)
+}
+
+func MD5ID(str string) string {
+	_str := strings.Join(strings.Fields(str), "")
+	h := md5.Sum([]byte(strings.ToUpper(_str)))
+	return fmt.Sprintf("%x", h)
 }
 
 func GetAllDomain() (domains []Domain, err error) {
@@ -203,6 +210,7 @@ func NewDomain(name string) *Domain {
 	return &Domain{
 		Name:      name,
 		Serial:    1,
+		Records:   make(map[string]*RecordEntry),
 		CreatedAt: time.Now().Format(TimeFormat),
 	}
 }
@@ -267,8 +275,7 @@ func (d *Domain) GenZoneFile() (err error) {
 	}
 
 	fileName := fmt.Sprintf("/opt/goproject/src/dnswm/zones/%s", d.Name)
-	fmt.Println(fileName)
-	f, err := os.OpenFile(fileName, os.O_CREATE|os.O_WRONLY, 0666)
+	f, err := os.OpenFile(fileName, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0666)
 	defer f.Close()
 
 	fc := strings.Join(fileContent, "\n")
@@ -307,7 +314,7 @@ func (d *Domain) AddRecordEntry(rName, rType, rValue string, rTTL, rPriority int
 		}
 	}
 
-	r.ID = utils.MD5ID(rName + rType + rValue)
+	r.ID = MD5ID(rName + rType + rValue)
 	r.Name = rName
 	r.Type = rType
 
@@ -338,23 +345,33 @@ func (d *Domain) DelRecordEntry(id string) (err error) {
 	return fmt.Errorf("no record entry")
 }
 
-func DomainValidate(name string) (ok bool, err error) {
-	ok = true
-	err = nil
+func DomainIsExist(name string) bool {
+	ok := true
+	_ = db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(BucketName))
+		d := b.Get([]byte(name))
+		if d == nil {
+			ok = false
+		}
+		return nil
+	})
+	return ok
+}
+
+func DomainValidate(name string) bool {
+	ok := true
 	if !strings.Contains(name, ".") {
 		ok = false
-		err = fmt.Errorf("domain %s is unspport type, only support *.lan", name)
-		return
+		return ok
 	} else {
 		_dl := strings.Split(name, ".")
 		if len(_dl) != 2 || _dl[len(_dl)-1] != "lan" {
 			ok = false
-			err = fmt.Errorf("domain %s is unspport type, only support *.lan", name)
-			return
+			return ok
 		}
 	}
 
-	return
+	return ok
 }
 
 type HTTPResponseData struct {
@@ -374,13 +391,15 @@ func APIDomain(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case "GET":
+		rd := HTTPResponseData{
+			Code: 0,
+			Msg:  fmt.Sprintf("query all domains done"),
+		}
 		_d, err := GetAllDomain()
 		if err != nil {
-			rd := HTTPResponseData{
-				Code: 1,
-				Msg:  fmt.Sprintf("%s", err),
-				Data: nil,
-			}
+			rd.Code = 1
+			rd.Msg = fmt.Sprintf("%s", err)
+			log.Println(rd.Msg)
 			json.NewEncoder(w).Encode(rd)
 		}
 
@@ -393,11 +412,8 @@ func APIDomain(w http.ResponseWriter, r *http.Request) {
 			dls = append(dls, dl)
 
 		}
-		rd := HTTPResponseData{
-			Code: 0,
-			Data: dls,
-		}
-
+		rd.Data = dls
+		log.Println(rd.Msg)
 		json.NewEncoder(w).Encode(rd)
 
 	case "POST":
@@ -410,15 +426,15 @@ func APIDomain(w http.ResponseWriter, r *http.Request) {
 			Msg:  fmt.Sprintf("domain %s add successful", _d),
 		}
 
-		if ok, err := DomainValidate(_d); !ok {
-			rd.Msg = fmt.Sprintf("%s", err)
+		if !DomainValidate(_d) {
+			rd.Code = 1
+			rd.Msg = fmt.Sprintf("%s is unspport domain, only support *.lan", _d)
 			log.Println(rd.Msg)
 			json.NewEncoder(w).Encode(rd)
 			return
 		}
 
-		_, err := DomainFromDB(_d)
-		if err == nil {
+		if DomainIsExist(_d) {
 			rd.Code = 1
 			rd.Msg = fmt.Sprintf("domain %s is exist", _d)
 			log.Println(rd.Msg)
@@ -427,9 +443,8 @@ func APIDomain(w http.ResponseWriter, r *http.Request) {
 		}
 
 		domainForAdd := NewDomain(_d)
-		domainForAdd.Records = make(map[string]*RecordEntry)
 		log.Printf("%#v\n", domainForAdd)
-		err = domainForAdd.SaveToDB()
+		err := domainForAdd.SaveToDB()
 		if err != nil {
 			rd.Code = 1
 			rd.Msg = fmt.Sprintf("%s", err)
@@ -459,10 +474,8 @@ func APIDomain(w http.ResponseWriter, r *http.Request) {
 		}
 		domainForDel, err := DomainFromDB(_d)
 		if err != nil {
-			rd = HTTPResponseData{
-				Code: 1,
-				Msg:  fmt.Sprintf("%s", err),
-			}
+			rd.Code = 1
+			rd.Msg = fmt.Sprintf("%s", err)
 			log.Println(rd.Msg)
 			json.NewEncoder(w).Encode(rd)
 			return
@@ -470,10 +483,8 @@ func APIDomain(w http.ResponseWriter, r *http.Request) {
 
 		err = domainForDel.DelDomainFromDB()
 		if err != nil {
-			rd = HTTPResponseData{
-				Code: 1,
-				Msg:  fmt.Sprintf("%s", err),
-			}
+			rd.Code = 1
+			rd.Msg = fmt.Sprintf("%s", err)
 			log.Println(rd.Msg)
 			json.NewEncoder(w).Encode(rd)
 			return
@@ -481,10 +492,8 @@ func APIDomain(w http.ResponseWriter, r *http.Request) {
 
 		err = domainForDel.DelZoneFile()
 		if err != nil {
-			rd = HTTPResponseData{
-				Code: 1,
-				Msg:  fmt.Sprintf("%s", err),
-			}
+			rd.Code = 1
+			rd.Msg = fmt.Sprintf("%s", err)
 			log.Println(rd.Msg)
 			json.NewEncoder(w).Encode(rd)
 			return
@@ -513,14 +522,16 @@ func APIRecord(w http.ResponseWriter, r *http.Request) {
 		_d := p.Get("domain")
 
 		rd := HTTPResponseData{Code: 0}
-		if ok, err := DomainValidate(_d); !ok {
-			rd.Msg = fmt.Sprintf("%s", err)
+		if !DomainValidate(_d) {
+			rd.Code = 1
+			rd.Msg = fmt.Sprintf("%s is unspport domain, only support *.lan", _d)
 			log.Println(rd.Msg)
 			json.NewEncoder(w).Encode(rd)
 			return
 		}
 		domain, err := DomainFromDB(_d)
 		if err != nil {
+			rd.Code = 1
 			rd.Msg = fmt.Sprintf("%s", err)
 			json.NewEncoder(w).Encode(rd)
 			return
@@ -545,6 +556,7 @@ func APIRecord(w http.ResponseWriter, r *http.Request) {
 		for k := range pm {
 			if k == "domain" || k == "name" || k == "type" || k == "value" {
 				if pm[k] == "" {
+					rd.Code = 1
 					rd.Msg = fmt.Sprintf("miss some args, like %s", k)
 					log.Println(rd.Msg)
 					json.NewEncoder(w).Encode(rd)
@@ -554,6 +566,7 @@ func APIRecord(w http.ResponseWriter, r *http.Request) {
 
 			if k == "type" && strings.ToUpper(pm[k]) == "MX" {
 				if pm["priority"] == "" {
+					rd.Code = 1
 					rd.Msg = fmt.Sprintf("miss proirity for type mx")
 					log.Println(rd.Msg)
 					json.NewEncoder(w).Encode(rd)
@@ -564,6 +577,7 @@ func APIRecord(w http.ResponseWriter, r *http.Request) {
 
 		d, err := DomainFromDB(pm["domain"])
 		if err != nil {
+			rd.Code = 1
 			rd.Msg = fmt.Sprintf("%s", err)
 			log.Println(rd.Msg)
 			json.NewEncoder(w).Encode(rd)
@@ -571,6 +585,7 @@ func APIRecord(w http.ResponseWriter, r *http.Request) {
 		}
 		_ttl, err := strconv.Atoi(pm["ttl"])
 		if err != nil {
+			rd.Code = 1
 			rd.Msg = fmt.Sprintf("%s", err)
 			log.Println(rd.Msg)
 			json.NewEncoder(w).Encode(rd)
@@ -580,6 +595,7 @@ func APIRecord(w http.ResponseWriter, r *http.Request) {
 		if strings.ToUpper(pm["type"]) == "MX" {
 			_priority, err = strconv.Atoi(pm["priority"])
 			if err != nil {
+				rd.Code = 1
 				rd.Msg = fmt.Sprintf("%s", err)
 				log.Println(rd.Msg)
 				json.NewEncoder(w).Encode(rd)
@@ -589,8 +605,9 @@ func APIRecord(w http.ResponseWriter, r *http.Request) {
 
 		log.Printf("%#v\n", d)
 
-		_id := utils.MD5ID(pm["name"] + pm["type"] + pm["value"])
+		_id := MD5ID(pm["name"] + pm["type"] + pm["value"])
 		if d.RecordIsExist(_id) {
+			rd.Code = 1
 			rd.Msg = fmt.Sprintf("[name: %s, type: %s, value: %s] record is exist", pm["name"], pm["type"], pm["value"])
 			log.Println(rd.Msg)
 			json.NewEncoder(w).Encode(rd)
@@ -600,6 +617,7 @@ func APIRecord(w http.ResponseWriter, r *http.Request) {
 		d.AddRecordEntry(pm["name"], pm["type"], pm["value"], _ttl, _priority)
 		err = d.SaveToDB()
 		if err != nil {
+			rd.Code = 1
 			rd.Msg = fmt.Sprintf("%s", err)
 			log.Println(rd.Msg)
 			json.NewEncoder(w).Encode(rd)
@@ -607,6 +625,7 @@ func APIRecord(w http.ResponseWriter, r *http.Request) {
 		}
 		err = d.GenZoneFile()
 		if err != nil {
+			rd.Code = 1
 			rd.Msg = fmt.Sprintf("%s", err)
 			log.Println(rd.Msg)
 			json.NewEncoder(w).Encode(rd)
@@ -615,6 +634,74 @@ func APIRecord(w http.ResponseWriter, r *http.Request) {
 
 		log.Println(rd.Msg)
 		json.NewEncoder(w).Encode(rd)
+	case "DELETE":
+		log.Printf("this %s method\n", r.Method)
+		err := r.ParseForm()
+		if err != nil {
+			log.Println(err)
+		}
+
+		pl := []string{"domain", "id"}
+		pm := map[string]string{}
+		for _, p := range pl {
+			pm[p] = r.Form.Get(p)
+		}
+
+		rd := HTTPResponseData{
+			Code: 0,
+			Msg:  fmt.Sprintf("delete record for domain %s successful", pm["domain"]),
+		}
+
+		log.Printf("%#v\n", pm)
+
+		for k := range pm {
+			if pm[k] == "" {
+				rd.Code = 1
+				rd.Msg = fmt.Sprintf("miss some args, like %s", k)
+				log.Println(rd.Msg)
+				json.NewEncoder(w).Encode(rd)
+				return
+			}
+		}
+
+		d, err := DomainFromDB(pm["domain"])
+		if err != nil {
+			rd.Code = 1
+			rd.Msg = fmt.Sprintf("%s", err)
+			log.Println(rd.Msg)
+			json.NewEncoder(w).Encode(rd)
+			return
+		}
+
+		log.Printf("%#v\n", d)
+		err = d.DelRecordEntry(pm["id"])
+		if err != nil {
+			rd.Code = 1
+			rd.Msg = fmt.Sprintf("%s", err)
+			log.Println(rd.Msg)
+			json.NewEncoder(w).Encode(rd)
+			return
+		}
+		err = d.SaveToDB()
+		if err != nil {
+			rd.Code = 1
+			rd.Msg = fmt.Sprintf("%s", err)
+			log.Println(rd.Msg)
+			json.NewEncoder(w).Encode(rd)
+			return
+		}
+		err = d.GenZoneFile()
+		if err != nil {
+			rd.Code = 1
+			rd.Msg = fmt.Sprintf("%s", err)
+			log.Println(rd.Msg)
+			json.NewEncoder(w).Encode(rd)
+			return
+		}
+
+		log.Println(rd.Msg)
+		json.NewEncoder(w).Encode(rd)
+
 	default:
 		rd := HTTPResponseData{
 			Code: 1,
@@ -622,5 +709,189 @@ func APIRecord(w http.ResponseWriter, r *http.Request) {
 		}
 		log.Println(rd.Msg)
 		json.NewEncoder(w).Encode(rd)
+	}
+}
+
+// GUI Domain
+func GUIDomain(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		dl, err := GetAllDomain()
+		if err != nil {
+			log.Println(err)
+		}
+		log.Println(dl)
+		tmpl := template.Must(template.ParseFiles("tmpl/domain-list.html"))
+		tmpl.Execute(w, dl)
+	case "POST":
+		r.ParseForm()
+		_d := r.PostFormValue("domain-name")
+		if !DomainValidate(_d) {
+			s := fmt.Sprintf("%s is unspport domain, only support *.lan", _d)
+			log.Println(s)
+			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
+			tmpl.Execute(w, s)
+		}
+		if DomainIsExist(_d) {
+			s := fmt.Sprintf("domain %s is exist, try another one", _d)
+			log.Println(s)
+			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
+			tmpl.Execute(w, s)
+		}
+
+		d := NewDomain(_d)
+		err := d.SaveToDB()
+		if err != nil {
+			s := fmt.Sprintf("found some error when save to db, error: %s", err)
+			log.Println(s)
+			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
+			tmpl.Execute(w, s)
+		}
+		err = d.GenZoneFile()
+		if err != nil {
+			s := fmt.Sprintf("found some error when generate zone file, error: %s", err)
+			log.Println(s)
+			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
+			tmpl.Execute(w, s)
+		}
+
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+
+	default:
+		s := "unknown method"
+		log.Println(s)
+		tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
+		tmpl.Execute(w, s)
+	}
+}
+
+func GUIDomainDel(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		r.ParseForm()
+		_d := r.Form["domain"][0]
+
+		d, err := DomainFromDB(_d)
+		if err != nil {
+			s := fmt.Sprintf("%s", err)
+			log.Println(s)
+			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
+			tmpl.Execute(w, s)
+		}
+		tmpl := template.Must(template.ParseFiles("tmpl/domain-del.html"))
+		tmpl.Execute(w, d)
+	case "POST":
+		r.ParseForm()
+		_d := r.PostFormValue("domaindel-input")
+		log.Println(_d)
+
+		d, err := DomainFromDB(_d)
+		if err != nil {
+			s := fmt.Sprintf("%s", err)
+			log.Println(s)
+			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
+			tmpl.Execute(w, s)
+		}
+		err = d.DelDomainFromDB()
+		if err != nil {
+			s := fmt.Sprintf("%s", err)
+			log.Println(s)
+			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
+			tmpl.Execute(w, s)
+		}
+		err = d.GenZoneFile()
+		if err != nil {
+			s := fmt.Sprintf("%s", err)
+			log.Println(s)
+			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
+			tmpl.Execute(w, s)
+		}
+
+		s := fmt.Sprintf("delete domain %s successful", _d)
+		log.Println(s)
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	default:
+		s := "unknown method"
+		log.Println(s)
+		tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
+		tmpl.Execute(w, s)
+	}
+}
+
+func GUIRecord(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case "GET":
+		r.ParseForm()
+		_d := r.FormValue("domain")
+		log.Println(_d)
+
+		d, err := DomainFromDB(_d)
+		if err != nil {
+			s := fmt.Sprintf("%s", err)
+			log.Println(s)
+			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
+			tmpl.Execute(w, s)
+		}
+		tmpl := template.Must(template.ParseFiles("tmpl/record-list.html"))
+		tmpl.Execute(w, d)
+	case "POST":
+		r.ParseForm()
+		log.Println(r.PostForm)
+
+		_domain := r.PostFormValue("domain")
+		_name := r.PostFormValue("name")
+		_type := r.PostFormValue("type")
+		_value := r.PostFormValue("value")
+		_ttl := r.PostFormValue("ttl")
+		_priority := r.PostFormValue("priority")
+
+		_priorityInt := -1
+		_ttlInt := 600
+
+		if _type == "MX" {
+			if _priority == "" {
+				_priorityInt = 10
+			} else {
+				_priorityInt, _ = strconv.Atoi(_priority)
+			}
+		}
+		if _ttl != "" {
+			_ttlInt, _ = strconv.Atoi(_ttl)
+		}
+
+		d, err := DomainFromDB(_domain)
+		if err != nil {
+			s := fmt.Sprintf("%s", err)
+			log.Println(s)
+			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
+			tmpl.Execute(w, s)
+		}
+
+		if d.RecordIsExist(_name + _type + _value) {
+			s := fmt.Sprintf("record [ %s %s %s ] is exist", _name, _type, _value)
+			log.Println(s)
+			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
+			tmpl.Execute(w, s)
+		}
+
+		d.AddRecordEntry(_name, _type, _value, _ttlInt, _priorityInt)
+		err = d.SaveToDB()
+		if err != nil {
+			s := fmt.Sprintf("%s", err)
+			log.Println(s)
+			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
+			tmpl.Execute(w, s)
+		}
+		err = d.GenZoneFile()
+		if err != nil {
+			s := fmt.Sprintf("%s", err)
+			log.Println(s)
+			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
+			tmpl.Execute(w, s)
+		}
+
+		s := fmt.Sprintf("record [ %s %s %s ] add successful", _name, _type, _value)
+		log.Println(s)
+		http.Redirect(w, r, fmt.Sprintf("/record?domain=%s", _domain), http.StatusSeeOther)
 	}
 }
