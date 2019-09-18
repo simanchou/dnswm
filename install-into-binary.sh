@@ -2,7 +2,7 @@ export DATA_PATH=/opt/dnswm
 export DNSWM_PORT=9001
 mkdir -p ${DATA_PATH}/zones
 mkdir -p ${DATA_PATH}/bin
-#curl -L https://github.com/simanchou/dnswm/releases/download/v1.0/dnswm-linux-1.0.tar.gz -o ${DATA_PATH}/dnswm-linux-1.0.tar.gz
+curl -L https://github.com/simanchou/dnswm/releases/download/v1.0/dnswm-linux-1.0.tar.gz -o ${DATA_PATH}/dnswm-linux-1.0.tar.gz
 cd ${DATA_PATH}
 tar zxf dnswm-linux-1.0.tar.gz
 chmod +x dnswm
