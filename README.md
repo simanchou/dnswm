@@ -1,2 +1,2 @@
 # dnswm
-dns web manager
+Dns web manager,implement web gui and api for coredns.

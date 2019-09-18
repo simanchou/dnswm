@@ -5,7 +5,7 @@ services:
     image: simanchou/dnswm
     restart: always
     environment:
-      - DNS_SERVER_IP=192.168.2.98
+      - DNS_SERVER_IP=192.168.2.98  #change your ip here
     ports:
       - "53:53/udp"
       - "9001:9001"
