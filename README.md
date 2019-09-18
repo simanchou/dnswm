@@ -89,6 +89,17 @@ curl -s -XDELETE http://192.168.2.98:9001/api/domain?domain=t4.lan|jq
 }
 ```
 ###### record
+add record
+
+```
+curl -s -XPOST -d 'domain=t5.lan&name=w4&type=A&ttl=600&value=4.4.4.4' http://192.168.2.98:9001/api/record|jq
+{
+  "Code": 0,
+  "Msg": "add record [ w4 A 4.4.4.4 ] for domain t5.lan successful",
+  "Data": null
+}
+
+```
 query record
 
 ```
@@ -98,7 +109,7 @@ curl -s -XGET http://192.168.2.98:9001/api/record?domain=t5.lan|jq
   "Msg": "",
   "Data": {
     "Name": "t5.lan",
-    "Serial": 4,
+    "Serial": 7,
     "Records": {
       "3584b32adb4a401292c5fcd0b397e4ef": {
         "ID": "3584b32adb4a401292c5fcd0b397e4ef",
@@ -107,6 +118,14 @@ curl -s -XGET http://192.168.2.98:9001/api/record?domain=t5.lan|jq
         "TTL": 600,
         "Priority": -1,
         "Value": "1.1.1.1"
+      },
+      "a17b751e19c93511a4d72f28886e5dd2": {
+        "ID": "a17b751e19c93511a4d72f28886e5dd2",
+        "Name": "w4",
+        "Type": "A",
+        "TTL": 600,
+        "Priority": -1,
+        "Value": "4.4.4.4"
       },
       "bf0c22289f180dd2e0a2e3c6d38bd6e1": {
         "ID": "bf0c22289f180dd2e0a2e3c6d38bd6e1",
@@ -129,19 +148,10 @@ curl -s -XGET http://192.168.2.98:9001/api/record?domain=t5.lan|jq
   }
 }
 
-```
-add record
-
-```
-curl -s -XPOST -d 'domain=t5.lan&name=w4&type=A&ttl=600&value=4.4.4.4' http://192.168.2.98:9001/api/record|jq
-{
-  "Code": 0,
-  "Msg": "add record [ w4 A 4.4.4.4 ] for domain t5.lan successful",
-  "Data": null
-}
 
 ```
 delete record
+> the id witch in the url is from query record, "ID": "a17b751e19c93511a4d72f28886e5dd2"
 
 ```
 curl -s -XDELETE 'http://192.168.2.98:9001/api/record?domain=t5.lan&id=a17b751e19c93511a4d72f28886e5dd2'|jq
@@ -150,5 +160,4 @@ curl -s -XDELETE 'http://192.168.2.98:9001/api/record?domain=t5.lan&id=a17b751e1
   "Msg": "delete record for domain t5.lan successful",
   "Data": null
 }
-
 ```
