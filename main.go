@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/md5"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"github.com/boltdb/bolt"
 	"html/template"
@@ -17,10 +18,13 @@ import (
 )
 
 const (
-	BucketName   = "domains"
-	TimeFormat   = "2006-01-02 15:04:05"
-	ZoneFilePath = "/opt/goproject/src/dnswm/zones"
+	BucketName = "domains"
+	TimeFormat = "2006-01-02 15:04:05"
 )
+
+var port string
+var workingPath string
+var zonePath string
 
 type Domain struct {
 	Name      string
@@ -47,8 +51,29 @@ func (a NameSorter) Less(i, j int) bool { return a[i].Name < a[j].Name }
 var db = &bolt.DB{}
 
 func init() {
+	flag.StringVar(&port, "p", "9001", "web manager listening port")
+	flag.StringVar(&workingPath, "d", "/opt/dnswm", "working path")
+	flag.Parse()
+
 	var err error
-	db, err = bolt.Open("my.db", 0600, &bolt.Options{Timeout: 1 * time.Second})
+
+	if _, err = os.Stat(workingPath); os.IsNotExist(err) {
+		err = os.MkdirAll(workingPath, 0755)
+	}
+	if err != nil {
+		log.Fatalf("init working path fail, error: %s", err)
+	}
+
+	zonePath = path.Join(workingPath, "zones")
+	if _, err = os.Stat(zonePath); os.IsNotExist(err) {
+		err = os.MkdirAll(zonePath, 0755)
+	}
+	if err != nil {
+		log.Fatalf("init zone file path fail, error: %s", err)
+	}
+
+	dbFile := path.Join(workingPath, "dnswm.db")
+	db, err = bolt.Open(dbFile, 0600, &bolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
 		log.Fatalf("open db fail, error: %s", err)
 	}
@@ -93,7 +118,8 @@ func main() {
 	http.HandleFunc("/api/domain", APIDomain)
 	http.HandleFunc("/api/record", APIRecord)
 
-	http.ListenAndServe(":9001", nil)
+	log.Printf("starting dns web manager at %s\n", port)
+	http.ListenAndServe(fmt.Sprintf(":%s", port), nil)
 }
 
 func MD5ID(str string) string {
@@ -187,7 +213,7 @@ func (d *Domain) GenZoneFile() (err error) {
 		fileContent = append(fileContent, r)
 	}
 
-	fileName := fmt.Sprintf("/opt/goproject/src/dnswm/zones/%s", d.Name)
+	fileName := path.Join(zonePath, d.Name)
 	f, err := os.OpenFile(fileName, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0666)
 	defer f.Close()
 
@@ -201,7 +227,7 @@ func (d *Domain) GenZoneFile() (err error) {
 }
 
 func (d *Domain) DelZoneFile() (err error) {
-	filePath := path.Join(ZoneFilePath, d.Name)
+	filePath := path.Join(zonePath, d.Name)
 	err = os.Remove(filePath)
 	return err
 }
@@ -313,6 +339,7 @@ func APIDomain(w http.ResponseWriter, r *http.Request) {
 			rd.Msg = fmt.Sprintf("%s", err)
 			log.Println(rd.Msg)
 			json.NewEncoder(w).Encode(rd)
+			return
 		}
 
 		var dls []DomainList
@@ -457,10 +484,7 @@ func APIRecord(w http.ResponseWriter, r *http.Request) {
 			pm[p] = r.Form.Get(p)
 		}
 
-		rd := HTTPResponseData{
-			Code: 0,
-			Msg:  fmt.Sprintf("add record for domain %s successful", pm["domain"]),
-		}
+		rd := HTTPResponseData{Code: 0}
 
 		for k := range pm {
 			if k == "domain" || k == "name" || k == "type" || k == "value" {
@@ -539,6 +563,7 @@ func APIRecord(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		rd.Msg = fmt.Sprintf("add record [ %s %s %s ] for domain %s successful", pm["name"], pm["type"], pm["value"], pm["domain"])
 		log.Println(rd.Msg)
 		json.NewEncoder(w).Encode(rd)
 	case "DELETE":
@@ -636,12 +661,14 @@ func GUIDomain(w http.ResponseWriter, r *http.Request) {
 			log.Println(s)
 			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
 			tmpl.Execute(w, s)
+			return
 		}
 		if DomainIsExist(_d) {
 			s := fmt.Sprintf("domain %s is exist, try another one", _d)
 			log.Println(s)
 			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
 			tmpl.Execute(w, s)
+			return
 		}
 
 		d := NewDomain(_d)
@@ -651,6 +678,7 @@ func GUIDomain(w http.ResponseWriter, r *http.Request) {
 			log.Println(s)
 			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
 			tmpl.Execute(w, s)
+			return
 		}
 		err = d.GenZoneFile()
 		if err != nil {
@@ -658,6 +686,7 @@ func GUIDomain(w http.ResponseWriter, r *http.Request) {
 			log.Println(s)
 			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
 			tmpl.Execute(w, s)
+			return
 		}
 		s := fmt.Sprintf("domain %s add successful", d.Name)
 		log.Println(s)
@@ -683,6 +712,7 @@ func GUIDomainDel(w http.ResponseWriter, r *http.Request) {
 			log.Println(s)
 			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
 			tmpl.Execute(w, s)
+			return
 		}
 		tmpl := template.Must(template.ParseFiles("tmpl/domain-del.html"))
 		tmpl.Execute(w, d)
@@ -696,6 +726,7 @@ func GUIDomainDel(w http.ResponseWriter, r *http.Request) {
 			log.Println(s)
 			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
 			tmpl.Execute(w, s)
+			return
 		}
 		err = d.DelDomainFromDB()
 		if err != nil {
@@ -703,6 +734,7 @@ func GUIDomainDel(w http.ResponseWriter, r *http.Request) {
 			log.Println(s)
 			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
 			tmpl.Execute(w, s)
+			return
 		}
 		err = d.GenZoneFile()
 		if err != nil {
@@ -710,6 +742,7 @@ func GUIDomainDel(w http.ResponseWriter, r *http.Request) {
 			log.Println(s)
 			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
 			tmpl.Execute(w, s)
+			return
 		}
 
 		s := fmt.Sprintf("delete domain %s successful", _d)
@@ -735,6 +768,7 @@ func GUIRecord(w http.ResponseWriter, r *http.Request) {
 			log.Println(s)
 			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
 			tmpl.Execute(w, s)
+			return
 		}
 		tmpl := template.Must(template.ParseFiles("tmpl/record-list.html"))
 		tmpl.Execute(w, d)
@@ -768,6 +802,7 @@ func GUIRecord(w http.ResponseWriter, r *http.Request) {
 			log.Println(s)
 			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
 			tmpl.Execute(w, s)
+			return
 		}
 
 		if d.RecordIsExist(_name + _type + _value) {
@@ -775,6 +810,7 @@ func GUIRecord(w http.ResponseWriter, r *http.Request) {
 			log.Println(s)
 			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
 			tmpl.Execute(w, s)
+			return
 		}
 
 		d.AddRecordEntry(_name, _type, _value, _ttlInt, _priorityInt)
@@ -784,6 +820,7 @@ func GUIRecord(w http.ResponseWriter, r *http.Request) {
 			log.Println(s)
 			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
 			tmpl.Execute(w, s)
+			return
 		}
 		err = d.GenZoneFile()
 		if err != nil {
@@ -791,9 +828,10 @@ func GUIRecord(w http.ResponseWriter, r *http.Request) {
 			log.Println(s)
 			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
 			tmpl.Execute(w, s)
+			return
 		}
 
-		s := fmt.Sprintf("record [ %s %s %s ] add successful", _name, _type, _value)
+		s := fmt.Sprintf("add record [ %s %s %s ] for domain %s successful", _name, _type, _value, d.Name)
 		log.Println(s)
 		http.Redirect(w, r, fmt.Sprintf("/record?domain=%s", _domain), http.StatusSeeOther)
 	default:
@@ -818,6 +856,7 @@ func GUIRecordDel(w http.ResponseWriter, r *http.Request) {
 			log.Println(s)
 			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
 			tmpl.Execute(w, s)
+			return
 		}
 
 		type dr struct {
@@ -845,6 +884,7 @@ func GUIRecordDel(w http.ResponseWriter, r *http.Request) {
 			log.Println(s)
 			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
 			tmpl.Execute(w, s)
+			return
 		}
 
 		_name := d.Records[_id].Name
@@ -857,6 +897,7 @@ func GUIRecordDel(w http.ResponseWriter, r *http.Request) {
 			log.Println(s)
 			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
 			tmpl.Execute(w, s)
+			return
 		}
 		err = d.SaveToDB()
 		if err != nil {
@@ -864,6 +905,7 @@ func GUIRecordDel(w http.ResponseWriter, r *http.Request) {
 			log.Println(s)
 			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
 			tmpl.Execute(w, s)
+			return
 		}
 		err = d.GenZoneFile()
 		if err != nil {
@@ -871,6 +913,7 @@ func GUIRecordDel(w http.ResponseWriter, r *http.Request) {
 			log.Println(s)
 			tmpl := template.Must(template.ParseFiles("tmpl/error-string.html"))
 			tmpl.Execute(w, s)
+			return
 		}
 		s := fmt.Sprintf("delete record [ name: %s type: %s value: %s ] for domain %s successful", _name, _type, _value, d.Name)
 		log.Println(s)
