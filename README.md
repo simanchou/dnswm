@@ -2,14 +2,14 @@
 Dns web manager is an out of the box tool for dns server and web manager(implement web gui and api for [coredns](https://github.com/coredns/coredns)).
 
 ### Install
--  use docker to try
+-  experience by using docker run
 
 ```
 export DNS_SERVER_IP=$(hostname -I | cut -d" " -f 1)
-docker run --name dnswm --rm -p53:53/udp -p9001:9001 -e DNS_SERVER_IP='$DNS_SERVER_IP' dnswm
+docker run --name dnswm --rm -p53:53/udp -p9001:9001 -e DNS_SERVER_IP='$DNS_SERVER_IP' simanchou/dnswm
 ```
 > Attention: data won't save by the example above!
-- use docker-compose
+- deploy by docker-compose
 
 ```
 version: '2'
