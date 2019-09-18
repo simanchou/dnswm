@@ -1,0 +1,14 @@
+version: '2'
+services:
+  dnswm:
+    container_name: dnswm
+    image: simanchou/dnswm
+    restart: always
+    environment:
+      - DNS_SERVER_IP=192.168.2.98
+    ports:
+      - "53:53/udp"
+      - "9001:9001"
+    volumes:
+      - ./data/:/opt/dnswm/
+      - /etc/localtime:/etc/localtime

@@ -1,13 +1,12 @@
-FROM debian:stretch
+FROM alpine:3.10
 
 LABEL maintainer="Siman Chou <https://github.com/simanchou/dnswm>"
 
-ADD docker/sources.list /etc/apt/
-RUN apt-get clean && apt-get update
-RUN apt-get -y install supervisor
+RUN echo "http://mirrors.ustc.edu.cn/alpine/v3.10/main" >/etc/apk/repositories && echo "http://mirrors.ustc.edu.cn/alpine/v3.10/community" >>/etc/apk/repositories
+RUN apk add --update --no-cache  --allow-untrusted supervisor
 
-RUN mkdir /opt/dnswm
-WORKDIR /opt/dnswm
+RUN mkdir /dnswm
+WORKDIR /dnswm
 COPY docker/start.sh .
 COPY coredns .
 COPY dnswm .
